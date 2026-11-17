@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chemistry Lab Calculator</title>
+<style>
+:root{--bg:#f4f7fb;--card:#fff;--tx:#1b2733;--mu:#5d6b79;--ac:#1f4e79;--bd:#d5dde6;--ok:#eaf3ea;--er:#fbeaea}
+@media(prefers-color-scheme:dark){:root{--bg:#12181f;--card:#1b242d;--tx:#e6edf3;--mu:#98a6b3;--ac:#5aa0d8;--bd:#2f3b47;--ok:#1c2f22;--er:#3a2222}}
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--tx)}
+header{background:var(--ac);color:#fff;padding:16px;text-align:center}
+header h1{margin:0;font-size:20px}header p{margin:4px 0 0;font-size:13px;opacity:.9}
+main{max-width:720px;margin:0 auto;padding:12px}
+nav{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+nav button{flex:1 1 auto;padding:10px;border:1px solid var(--bd);background:var(--card);color:var(--tx);border-radius:8px;font-size:14px;cursor:pointer}
+nav button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+details{background:var(--card);border:1px solid var(--bd);border-radius:8px;margin-bottom:8px}
+summary{padding:12px;font-weight:bold;cursor:pointer}
+form{padding:0 12px 12px}
+label{display:block;font-size:13px;color:var(--mu);margin:8px 0 3px}
+input,textarea{width:100%;padding:9px;border:1px solid var(--bd);border-radius:6px;background:var(--bg);color:var(--tx);font-size:15px;font-family:inherit}
+textarea{min-height:64px}
+.go{margin-top:12px;padding:10px 18px;background:var(--ac);color:#fff;border:0;border-radius:6px;font-size:15px;cursor:pointer}
+.out{margin-top:10px;padding:10px;border-radius:6px;background:var(--ok);font-size:15px;line-height:1.6}
+.out.err{background:var(--er)}
+.out:empty{display:none}
+.hi{background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:10px;margin-top:8px;font-size:14px;line-height:1.5}.hi small{color:var(--mu)}.hb{display:flex;gap:8px;flex-wrap:wrap}
+footer{text-align:center;color:var(--mu);font-size:12px;padding:14px}
+</style>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1f4e79">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+</head>
+<body>
+<header><h1>Chemistry Lab Calculator</h1><p>Solutions, titration, UV-Vis, GC/HPLC and TLC. Works offline.</p></header>
+<main><nav id="nav"></nav><div id="box"></div></main>
+<footer>Use consistent units (mL, g, mol/L). For lists, separate values with commas, spaces or new lines. Results are saved on this device only (History tab).</footer>
+<script>
+const sum=a=>a.reduce((p,c)=>p+c,0),mean=a=>sum(a)/a.length,
+sd=a=>Math.sqrt(sum(a.map(z=>(z-mean(a))**2))/(a.length-1)),
+f=n=>String(Number(n.toPrecision(6)));
+const CU="(concentration unit of the standards)";
+const cal=sig=>v=>{const x=v.x,y=v.y,n=x.length;
+ if(n!=y.length)throw Error(`${n} concentrations but ${y.length} ${sig} values`);
+ if(n<3)throw Error("Use at least 3 standards");
+ const xm=mean(x),ym=mean(y),sxx=sum(x.map(a=>(a-xm)**2));
+ if(!sxx)throw Error("All concentrations are the same");
+ const m=sum(x.map((a,i)=>(a-xm)*(y[i]-ym)))/sxx,b=ym-m*xm,
+ ssr=sum(x.map((a,i)=>(y[i]-m*a-b)**2)),sst=sum(y.map(a=>(a-ym)**2)),sr=Math.sqrt(ssr/(n-2));
+ if(!m)throw Error("Slope is zero, cannot calculate");
+ const o=[`y = ${f(m)} x + ${f(b)}`,`R² = ${sst?f(1-ssr/sst):"n/a"}`,
+ `LOD (3.3 s/slope) = ${f(3.3*sr/m)} ${CU}`,`LOQ (10 s/slope) = ${f(10*sr/m)} ${CU}`];
+ v.s.forEach(s=>o.push(`${sig} ${f(s)} -> concentration = ${f((s-b)/m*v.df)} ${CU}`+
+ (s<Math.min(...y)||s>Math.max(...y)?" (outside calibrated range)":"")));
+ o.plot={x,y,m,b,s:v.s};return o};
+const G={
+"Solutions":[
+["Molarity from mass",["mass|Mass of solute (g)","mm|Molar mass (g/mol)","v|Volume of solution (mL)"],
+ v=>{const n=v.mass/v.mm;return[`Moles = ${f(n)} mol`,`Molarity = ${f(n/(v.v/1000))} M`]}],
+["Molality from mass",["mass|Mass of solute (g)","mm|Molar mass (g/mol)","sv|Mass of solvent (g)"],
+ v=>{const n=v.mass/v.mm;return[`Moles = ${f(n)} mol`,`Molality = ${f(n/(v.sv/1000))} mol/kg`]}],
+["Mass to weigh for a required molarity",["M|Required molarity (M)","v|Required volume (mL)","mm|Molar mass (g/mol)","p|Purity of reagent (%)|100"],
+ v=>[`Weigh ${f(v.M*v.v/1000*v.mm/(v.p/100))} g of reagent (${f(v.p)}% pure)`,`Dissolve and make up to ${f(v.v)} mL`]],
+["Dilution (C1V1 = C2V2)",["c1|Stock concentration C1","c2|Required concentration C2 (same unit)","v2|Required final volume V2 (mL)"],
+ v=>{if(v.c2>v.c1)throw Error("Required concentration is higher than the stock");const v1=v.c2*v.v2/v.c1;
+ return[`Take ${f(v1)} mL of stock`,`Add ${f(v.v2-v1)} mL solvent (total ${f(v.v2)} mL)`]}],
+["Serial dilution",["c0|Starting concentration","fac|Dilution factor per step (10 = 1:10)","n|Number of steps","vol|Final volume of each tube (mL)"],
+ v=>{if(v.fac<=1)throw Error("Dilution factor must be greater than 1");if(v.n>50)throw Error("Maximum 50 steps");
+ const t=v.vol/v.fac,o=[`Each step: ${f(t)} mL of previous solution + ${f(v.vol-t)} mL diluent`];let c=v.c0;
+ for(let i=1;i<=v.n;i++){c/=v.fac;o.push(`Step ${i}: concentration = ${f(c)}`)}return o}],
+["Standard series from a stock solution",["stock|Stock concentration","vol|Final volume of each flask (mL)","*c|Required concentrations (same unit as stock)"],
+ v=>{let t=0;const o=v.c.map(c=>{if(c>v.stock)return`${f(c)}: higher than stock, cannot prepare`;
+ const s=c*v.vol/v.stock;t+=s;return`${f(c)}: take ${f(s)} mL stock, make up to ${f(v.vol)} mL`});o.push(`Total stock needed = ${f(t)} mL`);return o}],
+["Convert mol/L to ppm (mg/L)",["c|Concentration (mol/L)","mm|Molar mass (g/mol)"],v=>[`${f(v.c)} M = ${f(v.c*v.mm*1000)} ppm`]],
+["Convert ppm (mg/L) to mol/L",["c|Concentration (ppm)","mm|Molar mass (g/mol)"],v=>[`${f(v.c)} ppm = ${f(v.c/(v.mm*1000))} mol/L`]]
+],
+"Titration":[
+["Unknown concentration from titre",["a|a: coefficient of analyte|1","b|b: coefficient of titrant|1","mt|Titrant concentration (M)","vt|Titre volume (mL)","va|Volume of analyte titrated (mL)"],
+ v=>{const nt=v.mt*v.vt/1000,na=nt*v.a/v.b;return[`Moles of titrant = ${f(nt)} mol`,`Moles of analyte = ${f(na)} mol`,`Analyte concentration = ${f(na/(v.va/1000))} M`]}],
+["Mean titre, SD and RSD",["*t|Titre values (mL)"],
+ v=>{if(v.t.length<2)throw Error("Enter at least 2 titre values");const m=mean(v.t),s=sd(v.t),r=Math.max(...v.t)-Math.min(...v.t);
+ return[`Mean titre = ${f(m)} mL`,`Standard deviation = ${f(s)} mL`,`RSD = ${f(s/m*100)} %`,`Range = ${r.toFixed(2)} mL: ${r<=0.10001?"concordant (within 0.10 mL)":"NOT concordant, repeat the titration"}`]}],
+["Assay / % purity of a sample",["a|a: coefficient of analyte|1","b|b: coefficient of titrant|1","mt|Titrant concentration (M)","vt|Titre volume (mL)","mm|Molar mass of analyte (g/mol)","w|Mass of sample (g)","df|Dilution factor (total volume / aliquot, 1 if none)|1"],
+ v=>{const m=v.mt*v.vt/1000*v.a/v.b*v.mm*v.df;return[`Mass of analyte = ${f(m)} g`,`Content = ${f(m/v.w*100)} % w/w`]}],
+["Normality",["m|Molarity (M)","n|n-factor (equivalents per mole)"],v=>[`Normality = ${f(v.m*v.n)} N`]]
+],
+"UV-Vis":[
+["Beer-Lambert: find concentration",["-A|Absorbance (A)","e|Molar absorptivity (L/mol/cm)","b|Path length (cm)|1"],v=>[`Concentration = ${f(v.A/(v.e*v.b))} mol/L`]],
+["Beer-Lambert: find absorbance",["e|Molar absorptivity (L/mol/cm)","c|Concentration (mol/L)","b|Path length (cm)|1"],v=>[`Absorbance = ${f(v.e*v.b*v.c)}`]],
+["Beer-Lambert: find molar absorptivity",["-A|Absorbance (A)","c|Concentration (mol/L)","b|Path length (cm)|1"],v=>[`Molar absorptivity = ${f(v.A/(v.b*v.c))} L/(mol cm)`]],
+["%T to absorbance",["T|Percent transmittance (%T)"],v=>{if(v.T>100)throw Error("%T cannot be more than 100");return[`Absorbance = ${f(2-Math.log10(v.T))}`]}],
+["Absorbance to %T",["-A|Absorbance (A)"],v=>[`%T = ${f(100*10**(-v.A))} %`]],
+["Calibration curve, LOD/LOQ and unknowns",["*x|Standard concentrations","*y|Absorbances of standards (same order)","*s|Sample absorbances (optional)|","df|Sample dilution factor|1"],cal("Absorbance")]
+],
+"GC / HPLC":[
+["Calibration curve (peak area)",["*x|Standard concentrations","*y|Peak areas of standards (same order)","*s|Sample peak areas (optional)|","df|Sample dilution factor|1"],cal("Peak area")],
+["Internal standard method",["cas|Analyte conc. in standard","cis|Internal std conc. in standard","aas|Analyte peak area in standard","ais|Internal std peak area in standard","cis2|Internal std conc. in sample","aa|Analyte peak area in sample","ais2|Internal std peak area in sample"],
+ v=>{const rf=(v.aas/v.ais)/(v.cas/v.cis);return[`Response factor (RF) = ${f(rf)}`,`Analyte concentration in sample = ${f(v.aa/v.ais2/rf*v.cis2)} (same unit as standard)`]}],
+["Area percent (normalization)",["*a|Peak areas"],v=>{const t=sum(v.a);return v.a.map((x,i)=>`Peak ${i+1}: ${f(x/t*100)} %`).concat(`Total area = ${f(t)}`)}],
+["Retention factor (k)",["tr|Retention time tR (min)","t0|Dead time t0 (min)"],v=>{if(v.tr<=v.t0)throw Error("tR must be greater than t0");return[`k = ${f((v.tr-v.t0)/v.t0)}`]}],
+["Selectivity and resolution",["t0|Dead time t0 (min)","t1|Retention time, peak 1 (min)","t2|Retention time, peak 2 (min)","w1|Base width, peak 1 (min)","w2|Base width, peak 2 (min)"],
+ v=>{if(v.t1<=v.t0||v.t2<=v.t0)throw Error("Retention times must be greater than t0");
+ const k1=(v.t1-v.t0)/v.t0,k2=(v.t2-v.t0)/v.t0,rs=2*Math.abs(v.t2-v.t1)/(v.w1+v.w2);
+ return[`k1 = ${f(k1)}, k2 = ${f(k2)}`,`Selectivity (α) = ${f(Math.max(k1,k2)/Math.min(k1,k2))}`,`Resolution (Rs) = ${f(rs)}: ${rs>=1.5?"baseline resolved":"not fully resolved (Rs < 1.5)"}`]}],
+["Plate number (base width)",["tr|Retention time tR","w|Peak base width (same unit)","L|Column length (mm, optional)|"],
+ v=>{const n=16*(v.tr/v.w)**2,o=[`Theoretical plates N = ${f(n)}`];if(v.L)o.push(`Plate height = ${f(v.L/n)} mm`);return o}],
+["Plate number (half-height width)",["tr|Retention time tR","w|Peak width at half height (same unit)","L|Column length (mm, optional)|"],
+ v=>{const n=5.54*(v.tr/v.w)**2,o=[`Theoretical plates N = ${f(n)}`];if(v.L)o.push(`Plate height = ${f(v.L/n)} mm`);return o}],
+["Tailing factor",["w|Peak width at 5% height, W0.05","fr|Leading edge to peak maximum at 5% height, f"],
+ v=>{const t=v.w/(2*v.fr);return[`T = ${f(t)}: ${t<=2?"acceptable (usually ≤ 2.0)":"high tailing"}`]}]
+],
+"TLC":[
+["Rf value",["front|Distance travelled by solvent front (cm)","*d|Distance travelled by each spot (cm)"],
+ v=>v.d.map((d,i)=>d>v.front?`Spot ${i+1}: distance is larger than the solvent front, check values`:`Spot ${i+1}: Rf = ${f(d/v.front)}`)]
+]};
+
+function parse(s){const[k,label,def]=s.split("|");const fl=/^[*-]/.test(k)?k[0]:"";
+ return{id:fl?k.slice(1):k,label,def,list:fl=="*",any:fl!=""}}
+function card(c){
+ const fs=c[1].map(parse),d=document.createElement("details"),
+ h=fs.map(x=>`<label>${x.label}</label>`+(x.list?`<textarea data-id="${x.id}" placeholder="${x.def===undefined?"e.g. 1, 2, 3":"optional"}"></textarea>`
+ :`<input data-id="${x.id}" inputmode="decimal" autocomplete="off" placeholder="${x.def===undefined?"":x.def===""?"optional":"default "+x.def}">`)).join("");
+ d.innerHTML=`<summary>${c[0]}</summary><form>${h}<button class="go">Calculate</button><div class="out"></div></form>`;
+ const out=d.querySelector(".out");
+ d.querySelector("form").onsubmit=e=>{e.preventDefault();out.className="out";
+  try{const v={};
+   fs.forEach(x=>{const raw=d.querySelector(`[data-id="${x.id}"]`).value.trim();
+    if(x.list){const a=raw?raw.split(/[\s,;]+/).filter(Boolean).map(Number):[];
+     if(!a.length&&x.def===undefined)throw Error("Fill in: "+x.label);
+     if(a.some(isNaN))throw Error("Only numbers are allowed in: "+x.label);v[x.id]=a;return}
+    if(raw===""){if(x.def===undefined)throw Error("Fill in: "+x.label);v[x.id]=x.def===""?null:Number(x.def);return}
+    const n=Number(raw);if(isNaN(n))throw Error("Please enter a number for: "+x.label);
+    if(!x.any&&n<=0)throw Error("Must be greater than zero: "+x.label);v[x.id]=n});
+   const r=c[2](v);if(r.some(z=>/NaN|Infinity/.test(z)))throw Error("Cannot calculate with these values");
+   out.innerHTML=r.join("<br>")+(r.plot?plot(r.plot):"");logRes(c[0],r)}
+  catch(err){out.className="out err";out.textContent=err.message}};
+ return d}
+const nav=document.getElementById("nav"),box=document.getElementById("box");
+function show(g){[...nav.children].forEach(b=>b.classList.toggle("on",b.textContent==g));
+ box.innerHTML="";if(g=="History")box.append(histView());else G[g].forEach(c=>box.append(card(c)))}
+
+const esc=s=>String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+function plot(p){const W=320,H=220,L=48,R=12,T=12,B=30,
+ xs=p.x.concat(p.s.map(s=>(s-p.b)/p.m)),ys=p.y.concat(p.s),
+ x0=Math.min(...xs),x1=Math.max(...xs),y0=Math.min(...ys),y1=Math.max(...ys),
+ px=a=>L+(a-x0)/((x1-x0)||1)*(W-L-R),py=a=>H-B-(a-y0)/((y1-y0)||1)*(H-T-B),
+ pt=(a,b,c)=>`<circle cx="${px(a)}" cy="${py(b)}" r="4" fill="${c}"/>`,
+ tx=(x,y,a,t)=>`<text x="${x}" y="${y}" font-size="10" text-anchor="${a}" fill="currentColor">${t}</text>`;
+ return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:420px;margin-top:8px">`+
+ `<line x1="${L}" y1="${H-B}" x2="${W-R}" y2="${H-B}" stroke="currentColor"/><line x1="${L}" y1="${T}" x2="${L}" y2="${H-B}" stroke="currentColor"/>`+
+ `<line x1="${px(x0)}" y1="${py(p.m*x0+p.b)}" x2="${px(x1)}" y2="${py(p.m*x1+p.b)}" stroke="#d9822b" stroke-width="2"/>`+
+ p.x.map((a,i)=>pt(a,p.y[i],"#1f78c8")).join("")+p.s.map(s=>pt((s-p.b)/p.m,s,"#2e9e5b")).join("")+
+ tx(L,H-14,"start",f(x0))+tx(W-R,H-14,"end",f(x1))+tx(L-4,H-B,"end",f(y0))+tx(L-4,T+8,"end",f(y1))+
+ tx((L+W-R)/2,H-2,"middle","Concentration")+`</svg><div style="font-size:12px">Blue = standards, orange = fit line, green = samples</div>`}
+const HK="chemLabHistory";
+function getH(){try{return JSON.parse(localStorage.getItem(HK))||[]}catch(e){return[]}}
+function setH(h){try{localStorage.setItem(HK,JSON.stringify(h))}catch(e){}}
+function logRes(n,r){const h=getH();h.push({t:new Date().toLocaleString(),n,r:r.join("; ")});setH(h.slice(-500))}
+const csvCell=s=>'"'+String(s).replace(/"/g,'""')+'"';
+function histView(){const all=getH(),d=document.createElement("div");
+ d.innerHTML=`<div class="hb"><button class="go" id="dl">Download CSV</button><button class="go" id="clr" style="background:#a33">Clear history</button></div>`+
+ (all.length?all.slice().reverse().map(x=>`<div class="hi"><b>${esc(x.n)}</b> <small>${esc(x.t)}</small><br>${esc(x.r)}</div>`).join(""):`<p>No results saved yet. Results appear here after you press Calculate.</p>`);
+ d.querySelector("#dl").onclick=()=>{if(!all.length)return alert("Nothing to download yet.");
+  const rows=[["Time","Calculation","Result"]].concat(all.map(x=>[x.t,x.n,x.r])),
+  blob=new Blob(["\ufeff"+rows.map(r=>r.map(csvCell).join(",")).join("\r\n")],{type:"text/csv"}),
+  a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="lab_results_history.csv";a.click()};
+ d.querySelector("#clr").onclick=()=>{if(confirm("Delete all saved results?")){setH([]);show("History")}};
+ return d}
+Object.keys(G).concat("History").forEach(g=>{const b=document.createElement("button");b.textContent=g;b.onclick=()=>show(g);nav.append(b)});
+show("Solutions");
+</script>
+<script>if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js").catch(()=>{})</script>
+</body>
+</html>
